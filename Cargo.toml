@@ -7,6 +7,12 @@ edition = "2021"
 
 [dependencies]
 titlecase = "1.0"
+voyager = "0.1"
+anyhow = "1.0"
+futures = "0.3"
+rod = "0.2.3"
+finalfusion = "0.16"
+ndarray = "0.15.4"
 
 [dependencies.reqwest]
 version = "0.11"
@@ -23,3 +29,11 @@ features = ["json"]
 [dependencies.tokio]
 version = "1.0"
 features = ["full"]
+
+[dependencies.uuid]
+version = "1.1.2"
+features = ["v5", "fast-rng"]
+
+[dependencies.faiss]
+version = "0.6.0"
+features = ["gpu"]
