@@ -1,9 +1,11 @@
 use anyhow::Result;
+use finalfusion::{compat::text::ReadText, embeddings::Embeddings};
 use futures::StreamExt;
 use reqwest::Url;
 use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
-use tree::{get_sentence_embedding, CrawledEntry};
+use std::{fs::File, io::BufReader};
+use tree::{CrawledEntry, Embedding};
 use voyager::{
     scraper::Selector,
     {Collector, Crawler, CrawlerConfig, Response, Scraper},
@@ -120,6 +122,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .crawler_mut()
         .visit("https://jakedawkins.com/2020-04-16-unwrap-expect-rust/"); //.visit("https://www.wikipedia.org/");
 
+    let mut p = project_root::get_project_root().unwrap();
+    p.push("glove/glove.6B.50d.txt");
+    let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
+
+    let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
 
     let mut index = 0;
@@ -131,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(output) = collector.next().await {
         if let Ok((url, title, header, description, _)) = output {
-            if let Some(vec) = get_sentence_embedding(&title) {
+            if let Some(vec) = embeddings.get_sentence_embedding(&title) {
                 let crawled_json = CrawledEntry {
                     url: url.into(),
                     title,

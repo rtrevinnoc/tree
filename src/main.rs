@@ -1,9 +1,13 @@
 #[macro_use]
 extern crate rocket;
+use finalfusion::{
+    compat::text::ReadText, embeddings::Embeddings, storage::NdArray, vocab::SimpleVocab,
+};
 use hora::core::ann_index::ANNIndex;
 use rocket::serde::{json, json::Json, Serialize};
 use rocket::State;
-use tree::CrawledEntry;
+use std::{fs::File, io::BufReader};
+use tree::{CrawledEntry, Embedding};
 mod dbpedia;
 
 #[derive(Serialize)]
@@ -25,6 +29,7 @@ struct Answer {
 struct Config {
     vec_index: hora::index::hnsw_idx::HNSWIndex<f32, usize>,
     db: sled::Db,
+    embeddings: Embeddings<SimpleVocab, NdArray>,
 }
 
 #[get("/?<query>&<page>")]
@@ -32,7 +37,7 @@ async fn _answer(state: &State<Config>, query: &str, page: usize) -> Json<Answer
     let page_size = 5;
 
     let mut urls: Vec<Url> = Vec::new();
-    if let Some(query_vec) = tree::get_sentence_embedding(query) {
+    if let Some(query_vec) = state.embeddings.get_sentence_embedding(query) {
         for vec in state
             .vec_index
             .search(&query_vec.to_vec(), page_size * page)
@@ -71,6 +76,11 @@ async fn _answer(state: &State<Config>, query: &str, page: usize) -> Json<Answer
 
 #[launch]
 fn rocket() -> _ {
+    let mut p = project_root::get_project_root().unwrap();
+    p.push("glove/glove.6B.50d.txt");
+    let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
+
+    let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
     let mut index = hora::index::hnsw_idx::HNSWIndex::<f32, usize>::new(
         50,
@@ -98,6 +108,7 @@ fn rocket() -> _ {
     let config = Config {
         vec_index: index,
         db,
+        embeddings,
     };
 
     rocket::build()
