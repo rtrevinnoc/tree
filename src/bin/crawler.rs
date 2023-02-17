@@ -1,24 +1,13 @@
 use anyhow::Result;
 use futures::StreamExt;
-use ndarray::{Array, Ix1};
 use reqwest::Url;
-use rocket::serde::{json, Deserialize, Serialize};
+use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
-use tree::get_sentence_embedding;
-use uuid::Uuid;
+use tree::{get_sentence_embedding, CrawledEntry};
 use voyager::{
     scraper::Selector,
     {Collector, Crawler, CrawlerConfig, Response, Scraper},
 };
-
-#[derive(Serialize, Deserialize)]
-struct CrawledEntry {
-    url: String,
-    title: String,
-    header: String,
-    description: String,
-    vec: Array<f32, Ix1>,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -129,35 +118,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     collector
         .crawler_mut()
-        .visit("https://docs.rs/scraper/0.12.0/scraper/selector/struct.Selector.html#method.parse"); //.visit("https://www.wikipedia.org/");
+        .visit("https://jakedawkins.com/2020-04-16-unwrap-expect-rust/"); //.visit("https://www.wikipedia.org/");
 
     let db = sled::open("urlDatabase").expect("open");
 
     let mut index = 0;
+    if let Ok(last_result) = db.last() {
+        if let Some(last_option) = last_result {
+            index = String::from_utf8_lossy(&last_option.0).parse().unwrap();
+        }
+    }
+
     while let Some(output) = collector.next().await {
         if let Ok((url, title, header, description, _)) = output {
-            let url_string: String = url.into();
-            let uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, url_string.as_bytes());
-            let crawled_json;
-
-            if let Some(vec) = tree::get_sentence_embedding(&title) {
-                crawled_json = CrawledEntry {
-                    url: url_string,
+            if let Some(vec) = get_sentence_embedding(&title) {
+                let crawled_json = CrawledEntry {
+                    url: url.into(),
                     title,
                     header,
                     description,
-                    vec,
+                    vec: vec.to_vec(),
                 };
 
                 if let Ok(_) = db.insert(
                     index.to_string().as_str(),
                     json::to_string(&crawled_json).unwrap().as_str(),
                 ) {
-                    println!(
-                        "Crawled ({:?}): {}\n",
-                        uuid.as_bytes(),
-                        json::to_string(&crawled_json).unwrap()
-                    );
+                    // println!("Crawled {}\n", json::to_string(&crawled_json).unwrap());
                     index = index + 1;
                 }
             }

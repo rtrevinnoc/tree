@@ -12,6 +12,7 @@ anyhow = "1.0"
 futures = "0.3"
 finalfusion = "0.16"
 sled = "0.34.7"
+project-root = "0.2.2"
 
 [dependencies.ndarray]
 version = "0.15.4"
@@ -33,6 +34,5 @@ features = ["json"]
 version = "1.0"
 features = ["full"]
 
-[dependencies.uuid]
-version = "1.1.2"
-features = ["v5", "fast-rng"]
+[dependencies.hora]
+git = "https://github.com/rangsikitpho/hora.git"
