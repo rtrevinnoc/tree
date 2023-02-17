@@ -1,42 +1,23 @@
 use anyhow::Result;
 use futures::StreamExt;
+use ndarray::{Array, Ix1};
 use reqwest::Url;
-use std::collections::{
-    HashMap,
-    HashSet
-};
+use rocket::serde::{json, Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use tree::get_sentence_embedding;
+use uuid::Uuid;
 use voyager::{
     scraper::Selector,
-    {
-        Collector,
-        Crawler,
-        CrawlerConfig,
-        Response,
-        Scraper
-    }
+    {Collector, Crawler, CrawlerConfig, Response, Scraper},
 };
-use rod::{
-    Node,
-    Config,
-    Value
-};
-use tree::{
-    get_word_embedding,
-    get_sentence_embedding
-};
-use rocket::serde::{
-    Serialize,
-    Deserialize,
-    json
-};
-use uuid::Uuid;
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CrawledEntry {
     url: String,
     title: String,
     header: String,
     description: String,
+    vec: Array<f32, Ix1>,
 }
 
 #[tokio::main]
@@ -92,61 +73,49 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let title;
             match response.html().select(&self.meta_site_name_selector).next() {
                 Some(value) => {
-
                     title = value.value().attr("content").unwrap().trim().to_string();
-
                 }
-                None => {
-
-                    match response.html().select(&self.title_selector).next() {
-                        Some(value) => {
-                            title = value.text().next().unwrap().trim().to_string();
-                        }
-                        None => {
-                            title = "".to_string()
-                        }
+                None => match response.html().select(&self.title_selector).next() {
+                    Some(value) => {
+                        title = value.text().next().unwrap().trim().to_string();
                     }
-
-                }
+                    None => title = "".to_string(),
+                },
             }
 
             let header;
             match response.html().select(&self.meta_title_selector).next() {
                 Some(value) => {
-
                     header = value.value().attr("content").unwrap().trim().to_string();
-
                 }
-                None => {
-
-                    match response.html().select(&self.header_selector).next() {
-                        Some(value) => {
-                            header = value.text().next().unwrap().trim().to_string();
-                        }
-                        None => {
-                            header = "".to_string()
-                        }
+                None => match response.html().select(&self.header_selector).next() {
+                    Some(value) => {
+                        header = value.text().next().unwrap().trim().to_string();
                     }
-
-                }
+                    None => header = "".to_string(),
+                },
             }
 
             let description;
-            match response.html().select(&self.meta_description_selector).next() {
+            match response
+                .html()
+                .select(&self.meta_description_selector)
+                .next()
+            {
                 //Some(value) => { header = value.text().flat_map(|s| s.trim().chars()).collect::<String>(); }
                 Some(value) => {
-
                     description = value.value().attr("content").unwrap().trim().to_string();
-
                 }
-                None => {
-
-                    description = "".to_string()
-
-                }
+                None => description = "".to_string(),
             }
 
-            Ok(Some((response.response_url, title, header, description, response.depth)))
+            Ok(Some((
+                response.response_url,
+                title,
+                header,
+                description,
+                response.depth,
+            )))
         }
     }
 
@@ -158,36 +127,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_concurrent_requests(1_000);
     let mut collector = Collector::new(Explorer::default(), config);
 
-    collector.crawler_mut().visit("https://docs.rs/scraper/0.12.0/scraper/selector/struct.Selector.html#method.parse");//.visit("https://www.wikipedia.org/");
+    collector
+        .crawler_mut()
+        .visit("https://docs.rs/scraper/0.12.0/scraper/selector/struct.Selector.html#method.parse"); //.visit("https://www.wikipedia.org/");
 
-    let mut db = Node::new_with_config(Config {
-        outgoing_websocket_peers: vec!["wss://rtrevc.uber.space/ws".to_string()],
-        ..Config::default()
-    });
+    let db = sled::open("urlDatabase").expect("open");
 
-    //let mut sub = db.get("greeting").on();
-    ////db.get("greeting").put("Hello World!".into());
-    //if let Value::Text(str) = sub.recv().await.unwrap() {
-        //println!("{}", &str);
-        //assert_eq!(&str, "Hello World!");
-    //}
-    
-    //let mut reader = BufReader::new(File::open("./glove.6B/glove.6B.50d.txt").unwrap());
-    //let embeddings = Embeddings::read_text(&mut reader).unwrap();
-    //let embedding = embeddings.embedding("future");
-    //dbg!(embedding);
-
+    let mut index = 0;
     while let Some(output) = collector.next().await {
         if let Ok((url, title, header, description, _)) = output {
             let url_string: String = url.into();
             let uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, url_string.as_bytes());
-            let crawled_json = CrawledEntry {
-                url: url_string,
-                title,
-                header,
-                description
-            };
-            println!("Crawled ({:?}): {}\n", uuid.as_bytes(), json::to_string(&crawled_json).unwrap());
+            let crawled_json;
+
+            if let Some(vec) = tree::get_sentence_embedding(&title) {
+                crawled_json = CrawledEntry {
+                    url: url_string,
+                    title,
+                    header,
+                    description,
+                    vec,
+                };
+
+                if let Ok(_) = db.insert(
+                    index.to_string().as_str(),
+                    json::to_string(&crawled_json).unwrap().as_str(),
+                ) {
+                    println!(
+                        "Crawled ({:?}): {}\n",
+                        uuid.as_bytes(),
+                        json::to_string(&crawled_json).unwrap()
+                    );
+                    index = index + 1;
+                }
+            }
         }
     }
 

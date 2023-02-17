@@ -1,3 +1,4 @@
 /target
-sled_db/
 glove.6B/
+urlDatabase/
+Cargo.lock
