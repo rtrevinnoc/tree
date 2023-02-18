@@ -4,6 +4,7 @@ use futures::StreamExt;
 use reqwest::Url;
 use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
+use std::env::var;
 use std::{fs::File, io::BufReader};
 use tree::{CrawledEntry, Embedding};
 use voyager::{
@@ -118,9 +119,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_concurrent_requests(1_000);
     let mut collector = Collector::new(Explorer::default(), config);
 
-    collector
-        .crawler_mut()
-        .visit("https://jakedawkins.com/2020-04-16-unwrap-expect-rust/"); //.visit("https://www.wikipedia.org/");
+    match var("START_URL") {
+        Ok(url) => {
+            collector.crawler_mut().visit(url);
+        }
+        Err(e) => {
+            println!("Error: {:?}. Set the START_URL environment variable to where you want to start crawling.", e);
+            return Ok(());
+        }
+    }
 
     let mut p = project_root::get_project_root().unwrap();
     p.push("glove/glove.6B.50d.txt");
@@ -140,7 +147,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Ok((url, title, header, description, _)) = output {
             if let Some(vec) = embeddings.get_sentence_embedding(&title) {
                 let crawled_json = CrawledEntry {
-                    url: url.into(),
+                    url: url.clone().into(),
                     title,
                     header,
                     description,
@@ -151,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     index.to_string().as_str(),
                     json::to_string(&crawled_json).unwrap().as_str(),
                 ) {
-                    // println!("Crawled {}\n", json::to_string(&crawled_json).unwrap());
+                    print!("Crawled {}\n", url);
                     index = index + 1;
                 }
             }

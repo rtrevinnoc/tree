@@ -78,6 +78,7 @@ async fn _answer(state: &State<Config>, query: &str, page: usize) -> Json<Answer
 fn rocket() -> _ {
     let mut p = project_root::get_project_root().unwrap();
     p.push("glove/glove.6B.50d.txt");
+    dbg!(p);
     let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
