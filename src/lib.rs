@@ -12,12 +12,12 @@ pub struct CrawledEntry {
     pub language: String,
 }
 
-pub trait Embedding {
+pub trait SentenceEmbeddings {
     fn get_word_embedding(&self, word: &str) -> Option<CowArray<f32, Ix1>>;
     fn get_sentence_embedding(&self, sentence: &str) -> Option<Array<f32, Ix1>>;
 }
 
-impl Embedding for Embeddings<SimpleVocab, NdArray> {
+impl SentenceEmbeddings for Embeddings<SimpleVocab, NdArray> {
     fn get_word_embedding(&self, word: &str) -> Option<CowArray<f32, Ix1>> {
         return self.embedding(word);
     }

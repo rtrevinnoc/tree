@@ -8,7 +8,7 @@ use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
 use std::env::var;
 use std::{fs::File, io::BufReader};
-use tree::{CrawledEntry, Embedding};
+use tree::{CrawledEntry, SentenceEmbeddings};
 use uuid::Uuid;
 use voyager::{
     scraper::Selector,
@@ -68,26 +68,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let title;
             match response.html().select(&self.meta_site_name_selector).next() {
                 Some(value) => {
-                    title = value.value().attr("content").unwrap().trim().to_string();
+                    title = value.value().attr("content").unwrap().trim().to_owned();
                 }
                 None => match response.html().select(&self.title_selector).next() {
                     Some(value) => {
-                        title = value.text().next().unwrap().trim().to_string();
+                        title = value.text().next().unwrap().trim().to_owned();
                     }
-                    None => title = "".to_string(),
+                    None => title = "".to_owned(),
                 },
             }
 
             let header;
             match response.html().select(&self.meta_title_selector).next() {
                 Some(value) => {
-                    header = value.value().attr("content").unwrap().trim().to_string();
+                    header = value.value().attr("content").unwrap().trim().to_owned();
                 }
                 None => match response.html().select(&self.header_selector).next() {
                     Some(value) => {
-                        header = value.text().next().unwrap().trim().to_string();
+                        header = value.text().next().unwrap().trim().to_owned();
                     }
-                    None => header = "".to_string(),
+                    None => header = "".to_owned(),
                 },
             }
 
@@ -99,9 +99,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             {
                 //Some(value) => { header = value.text().flat_map(|s| s.trim().chars()).collect::<String>(); }
                 Some(value) => {
-                    description = value.value().attr("content").unwrap().trim().to_string();
+                    description = value.value().attr("content").unwrap().trim().to_owned();
                 }
-                None => description = "".to_string(),
+                None => description = "".to_owned(),
             }
 
             Ok(Some((

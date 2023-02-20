@@ -7,7 +7,7 @@ use hora::core::ann_index::ANNIndex;
 use rocket::serde::{json, json::Json, Serialize};
 use rocket::State;
 use std::{fs::File, io::BufReader};
-use tree::{CrawledEntry, Embedding};
+use tree::{CrawledEntry, SentenceEmbeddings};
 mod dbpedia;
 
 #[derive(Serialize)]
@@ -40,7 +40,6 @@ async fn _answer(
     page: usize,
     language_option: Option<&str>,
 ) -> Json<Answer> {
-    dbg!(language_option);
     let page_size = 5;
 
     let mut urls: Vec<Url> = Vec::new();
@@ -50,7 +49,7 @@ async fn _answer(
             .search(&query_vec.to_vec(), page_size * page)
             .split_off(page_size * (page - 1))
         {
-            if let Ok(value_result) = state.db.get(vec_id.to_string().as_str()) {
+            if let Ok(value_result) = state.db.get(&vec_id.to_string()) {
                 if let Some(value_option) = value_result {
                     match json::from_str::<CrawledEntry>(
                         String::from_utf8_lossy(&value_option).as_ref(),
@@ -82,9 +81,9 @@ async fn _answer(
 
     Json(Answer {
         urls,
-        small_summary: answer.clone(),
+        small_summary: (&answer).into(),
         answer,
-        corrected: query.to_string(),
+        corrected: query.into(),
     })
 }
 
