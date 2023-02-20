@@ -36,3 +36,12 @@ features = ["full"]
 
 [dependencies.hora]
 git = "https://github.com/rangsikitpho/hora.git"
+
+[dependencies.lingua]
+version = "1.4.0"
+default-features = false
+features = ["english", "spanish"]
+
+[dependencies.uuid]
+version = "1.1.2"
+features = ["v5", "fast-rng"]

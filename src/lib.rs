@@ -2,13 +2,6 @@ use finalfusion::{embeddings::Embeddings, storage::NdArray, vocab::SimpleVocab};
 use ndarray::{Array, CowArray, Ix1};
 use rocket::serde::{Deserialize, Serialize};
 
-// static EMBEDDINGS: LazyLock<Embeddings<SimpleVocab, NdArray>> = LazyLock::new(|| {
-//     let mut p = project_root::get_project_root().unwrap();
-//     p.push("glove/glove.6B.50d.txt");
-//     let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
-//     return Embeddings::read_text(&mut reader).unwrap();
-// });
-
 #[derive(Serialize, Deserialize)]
 pub struct CrawledEntry {
     pub url: String,
@@ -16,6 +9,7 @@ pub struct CrawledEntry {
     pub header: String,
     pub description: String,
     pub vec: Vec<f32>,
+    pub language: String,
 }
 
 pub trait Embedding {

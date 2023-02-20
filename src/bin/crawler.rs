@@ -1,12 +1,15 @@
 use anyhow::Result;
 use finalfusion::{compat::text::ReadText, embeddings::Embeddings};
 use futures::StreamExt;
+use lingua::Language::{English, Spanish};
+use lingua::{LanguageDetector, LanguageDetectorBuilder};
 use reqwest::Url;
 use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
 use std::env::var;
 use std::{fs::File, io::BufReader};
 use tree::{CrawledEntry, Embedding};
+use uuid::Uuid;
 use voyager::{
     scraper::Selector,
     {Collector, Crawler, CrawlerConfig, Response, Scraper},
@@ -136,30 +139,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
 
-    let mut index = 0;
-    if let Ok(last_result) = db.last() {
-        if let Some(last_option) = last_result {
-            index = String::from_utf8_lossy(&last_option.0).parse().unwrap();
-        }
-    }
+    let languages = vec![English, Spanish];
+    let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&languages).build();
 
     while let Some(output) = collector.next().await {
         if let Ok((url, title, header, description, _)) = output {
+            let url_string: String = url.clone().into();
+            let uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, url_string.as_bytes());
             if let Some(vec) = embeddings.get_sentence_embedding(&title) {
                 let crawled_json = CrawledEntry {
-                    url: url.clone().into(),
-                    title,
+                    url: url_string,
+                    title: title.clone(),
                     header,
                     description,
                     vec: vec.to_vec(),
+                    language: detector
+                        .detect_language_of(title)
+                        .unwrap_or(English)
+                        .iso_code_639_1()
+                        .to_string(),
                 };
 
                 if let Ok(_) = db.insert(
-                    index.to_string().as_str(),
+                    uuid.as_u128().to_string(),
                     json::to_string(&crawled_json).unwrap().as_str(),
                 ) {
                     print!("Crawled {}\n", url);
-                    index = index + 1;
                 }
             }
         }

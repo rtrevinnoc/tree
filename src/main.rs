@@ -16,6 +16,7 @@ struct Url {
     title: String,
     header: String,
     description: String,
+    language: String,
 }
 
 #[derive(Serialize)]
@@ -27,33 +28,46 @@ struct Answer {
 }
 
 struct Config {
-    vec_index: hora::index::hnsw_idx::HNSWIndex<f32, usize>,
+    vec_index: hora::index::hnsw_idx::HNSWIndex<f32, u128>,
     db: sled::Db,
     embeddings: Embeddings<SimpleVocab, NdArray>,
 }
 
-#[get("/?<query>&<page>")]
-async fn _answer(state: &State<Config>, query: &str, page: usize) -> Json<Answer> {
+#[get("/?<query>&<page>&<language_option>")]
+async fn _answer(
+    state: &State<Config>,
+    query: &str,
+    page: usize,
+    language_option: Option<&str>,
+) -> Json<Answer> {
+    dbg!(language_option);
     let page_size = 5;
 
     let mut urls: Vec<Url> = Vec::new();
     if let Some(query_vec) = state.embeddings.get_sentence_embedding(query) {
-        for vec in state
+        for vec_id in state
             .vec_index
             .search(&query_vec.to_vec(), page_size * page)
             .split_off(page_size * (page - 1))
         {
-            if let Ok(value_result) = state.db.get(vec.to_string().as_str()) {
+            if let Ok(value_result) = state.db.get(vec_id.to_string().as_str()) {
                 if let Some(value_option) = value_result {
                     match json::from_str::<CrawledEntry>(
                         String::from_utf8_lossy(&value_option).as_ref(),
                     ) {
                         Ok(url_value) => {
+                            if let Some(language) = language_option {
+                                if !url_value.language.eq(language) {
+                                    continue;
+                                }
+                            }
+
                             urls.push(Url {
                                 url: url_value.url,
                                 title: url_value.title,
                                 header: url_value.header,
                                 description: url_value.description,
+                                language: url_value.language,
                             });
                         }
                         Err(_) => {}
@@ -83,14 +97,14 @@ fn rocket() -> _ {
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
-    let mut index = hora::index::hnsw_idx::HNSWIndex::<f32, usize>::new(
+    let mut index = hora::index::hnsw_idx::HNSWIndex::<f32, u128>::new(
         50,
         &hora::index::hnsw_params::HNSWParams::<f32>::default(),
     );
 
     for url in db.iter() {
         if let Ok(url) = url {
-            let url_key: usize = String::from_utf8_lossy(&url.0).parse().unwrap();
+            let url_key: u128 = String::from_utf8_lossy(&url.0).parse().unwrap();
             match json::from_str::<CrawledEntry>(String::from_utf8_lossy(&url.1).as_ref()) {
                 Ok(url_value) => {
                     index.add(&url_value.vec, url_key).unwrap();
