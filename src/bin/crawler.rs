@@ -65,43 +65,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
 
-            let title;
+            let mut title = String::from("");
             match response.html().select(&self.meta_site_name_selector).next() {
                 Some(value) => {
-                    title = value.value().attr("content").unwrap().trim().to_owned();
-                }
-                None => match response.html().select(&self.title_selector).next() {
-                    Some(value) => {
-                        title = value.text().next().unwrap().trim().to_owned();
+                    if let Some(value) = value.value().attr("content") {
+                        title = value.trim().to_owned();
                     }
-                    None => title = "".to_owned(),
-                },
+                }
+                None => {
+                    if let Some(value) = response.html().select(&self.title_selector).next() {
+                        if let Some(value) = value.text().next() {
+                            title = value.trim().to_owned();
+                        }
+                    }
+                }
             }
 
-            let header;
+            let mut header = String::from("");
             match response.html().select(&self.meta_title_selector).next() {
                 Some(value) => {
-                    header = value.value().attr("content").unwrap().trim().to_owned();
-                }
-                None => match response.html().select(&self.header_selector).next() {
-                    Some(value) => {
-                        header = value.text().next().unwrap().trim().to_owned();
+                    if let Some(value) = value.value().attr("content") {
+                        header = value.trim().to_owned();
                     }
-                    None => header = "".to_owned(),
-                },
+                }
+                None => {
+                    if let Some(value) = response.html().select(&self.header_selector).next() {
+                        if let Some(value) = value.text().next() {
+                            header = value.trim().to_owned();
+                        }
+                    }
+                }
             }
 
-            let description;
-            match response
+            let mut description = String::from("");
+            if let Some(value) = response
                 .html()
                 .select(&self.meta_description_selector)
                 .next()
             {
-                //Some(value) => { header = value.text().flat_map(|s| s.trim().chars()).collect::<String>(); }
-                Some(value) => {
-                    description = value.value().attr("content").unwrap().trim().to_owned();
+                if let Some(value) = value.value().attr("content") {
+                    description = value.trim().to_owned();
                 }
-                None => description = "".to_owned(),
             }
 
             Ok(Some((
