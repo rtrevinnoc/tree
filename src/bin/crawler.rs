@@ -8,7 +8,7 @@ use rocket::serde::json;
 use std::collections::{HashMap, HashSet};
 use std::env::var;
 use std::{fs::File, io::BufReader};
-use tree::{CrawledEntry, SentenceEmbeddings};
+use tree::{get_sentence_embedding, CrawledEntry};
 use uuid::Uuid;
 use voyager::{
     scraper::Selector,
@@ -150,18 +150,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Ok((url, title, header, description, _)) = output {
             let url_string: String = url.clone().into();
             let uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, url_string.as_bytes());
-            if let Some(vec) = embeddings.get_sentence_embedding(&title) {
+            let language = match detector.detect_language_of(&title) {
+                Some(language) => language.iso_code_639_1().to_string(),
+                None => String::from("unk"),
+            };
+            if let Some(vec) = get_sentence_embedding(&embeddings, &title).await {
                 let crawled_json = CrawledEntry {
                     url: url_string,
                     title: title.clone(),
                     header,
                     description,
                     vec: vec.to_vec(),
-                    language: detector
-                        .detect_language_of(title)
-                        .unwrap_or(English)
-                        .iso_code_639_1()
-                        .to_string(),
+                    language,
                 };
 
                 if let Ok(_) = db.insert(

@@ -7,7 +7,7 @@ use hora::core::ann_index::ANNIndex;
 use rocket::serde::{json, json::Json, Serialize};
 use rocket::State;
 use std::{fs::File, io::BufReader};
-use tree::{CrawledEntry, SentenceEmbeddings};
+use tree::{get_sentence_embedding, CrawledEntry};
 mod dbpedia;
 
 #[derive(Serialize)]
@@ -43,7 +43,7 @@ async fn _answer(
     let page_size = 5;
 
     let mut urls: Vec<Url> = Vec::new();
-    if let Some(query_vec) = state.embeddings.get_sentence_embedding(query) {
+    if let Some(query_vec) = get_sentence_embedding(&state.embeddings, query).await {
         for vec_id in state
             .vec_index
             .search(&query_vec.to_vec(), page_size * page)
@@ -91,7 +91,6 @@ async fn _answer(
 fn rocket() -> _ {
     let mut p = project_root::get_project_root().unwrap();
     p.push("glove/glove.6B.50d.txt");
-    dbg!(p);
     let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
