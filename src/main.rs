@@ -76,8 +76,12 @@ async fn _answer(
         }
     }
 
-    let dbpedia_resource = dbpedia::get_resource(query).await.unwrap();
-    let answer = dbpedia::get_summary(&dbpedia_resource).await.unwrap();
+    let dbpedia_resource = dbpedia::get_resource(query)
+        .await
+        .unwrap_or(String::from(""));
+    let answer = dbpedia::get_summary(&dbpedia_resource)
+        .await
+        .unwrap_or(String::from(""));
 
     Json(Answer {
         urls,
