@@ -118,12 +118,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let max_concurrent_requests = match var("MAX_CONCURRENT_REQUESTS") {
+        Ok(number) => number.parse().unwrap_or(100),
+        Err(_) => 100,
+    };
+
     let config = CrawlerConfig::default()
         .disallow_domains(vec!["facebook.com", "google.com"])
         // stop after 3 jumps
         .max_depth(4)
         // maximum of requests that are active
-        .max_concurrent_requests(1_000);
+        .max_concurrent_requests(max_concurrent_requests);
+        // .respect_robots_txt();
+
     let mut collector = Collector::new(Explorer::default(), config);
 
     match var("START_URL") {
