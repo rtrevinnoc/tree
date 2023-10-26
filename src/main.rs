@@ -94,8 +94,8 @@ async fn _answer(
 #[launch]
 fn rocket() -> _ {
     let mut p = project_root::get_project_root().unwrap();
-    p.push("glove/glove.6B.50d.txt");
-    let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
+    p.push("glove.6B/glove.6B.50d.txt");
+    let mut reader = BufReader::new(File::open(p).unwrap());
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
