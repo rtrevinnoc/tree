@@ -129,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_depth(4)
         // maximum of requests that are active
         .max_concurrent_requests(max_concurrent_requests);
-        // .respect_robots_txt();
+    // .respect_robots_txt();
 
     let mut collector = Collector::new(Explorer::default(), config);
 
@@ -144,8 +144,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut p = project_root::get_project_root().unwrap();
-    p.push("glove/glove.6B.50d.txt");
-    let mut reader = BufReader::new(File::open("glove.6B/glove.6B.50d.txt").unwrap());
+    p.push("glove.6B/glove.6B.50d.txt");
+    let mut reader = BufReader::new(File::open(p).unwrap());
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");

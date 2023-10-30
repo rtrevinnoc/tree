@@ -1,5 +1,6 @@
 /target
 glove.6B/
 urlDatabase/
+peerDatabase/
 Cargo.lock
 Rocket.toml

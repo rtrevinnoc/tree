@@ -1,23 +1,13 @@
 #[macro_use]
 extern crate rocket;
-use finalfusion::{
-    compat::text::ReadText, embeddings::Embeddings, storage::NdArray, vocab::SimpleVocab,
-};
+use finalfusion::{compat::text::ReadText, embeddings::Embeddings};
 use hora::core::ann_index::ANNIndex;
-use rocket::serde::{json, json::Json, Serialize};
+use rocket::http::Status;
+use rocket::serde::{json, json::Json, Deserialize, Serialize};
 use rocket::State;
 use std::{fs::File, io::BufReader};
-use tree::{get_sentence_embedding, CrawledEntry};
+use tree::{get_url_list, Config, CrawledEntry, Url};
 mod dbpedia;
-
-#[derive(Serialize)]
-struct Url {
-    url: String,
-    title: String,
-    header: String,
-    description: String,
-    language: String,
-}
 
 #[derive(Serialize)]
 struct Answer {
@@ -27,10 +17,19 @@ struct Answer {
     corrected: String,
 }
 
-struct Config {
-    vec_index: hora::index::hnsw_idx::HNSWIndex<f32, u128>,
-    db: sled::Db,
-    embeddings: Embeddings<SimpleVocab, NdArray>,
+#[derive(Serialize)]
+struct Results {
+    urls: Vec<Url>,
+}
+
+#[derive(Serialize)]
+struct Peers {
+    peers: Vec<Peer>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Peer {
+    address: String,
 }
 
 #[get("/?<query>&<page>&<language_option>")]
@@ -39,42 +38,13 @@ async fn _answer(
     query: &str,
     page: usize,
     language_option: Option<&str>,
-) -> Json<Answer> {
+) -> Result<Json<Answer>, Status> {
     let page_size = 5;
 
-    let mut urls: Vec<Url> = Vec::new();
-    if let Some(query_vec) = get_sentence_embedding(&state.embeddings, query).await {
-        for vec_id in state
-            .vec_index
-            .search(&query_vec.to_vec(), page_size * page)
-            .split_off(page_size * (page - 1))
-        {
-            if let Ok(value_result) = state.db.get(&vec_id.to_string()) {
-                if let Some(value_option) = value_result {
-                    match json::from_str::<CrawledEntry>(
-                        String::from_utf8_lossy(&value_option).as_ref(),
-                    ) {
-                        Ok(url_value) => {
-                            if let Some(language) = language_option {
-                                if !url_value.language.eq(language) {
-                                    continue;
-                                }
-                            }
-
-                            urls.push(Url {
-                                url: url_value.url,
-                                title: url_value.title,
-                                header: url_value.header,
-                                description: url_value.description,
-                                language: url_value.language,
-                            });
-                        }
-                        Err(_) => {}
-                    }
-                }
-            }
-        }
-    }
+    let urls = match get_url_list(state, query, page, page_size, language_option).await {
+        Ok(results) => results,
+        Err(_) => return Err(Status::InternalServerError),
+    };
 
     let dbpedia_resource = dbpedia::get_resource(query)
         .await
@@ -83,12 +53,91 @@ async fn _answer(
         .await
         .unwrap_or(String::from(""));
 
-    Json(Answer {
+    Ok(Json(Answer {
         urls,
         small_summary: (&answer).into(),
         answer,
         corrected: query.into(),
-    })
+    }))
+}
+
+#[get("/?<query>&<page>&<language_option>")]
+async fn _results(
+    state: &State<Config>,
+    query: &str,
+    page: usize,
+    language_option: Option<&str>,
+) -> Result<Json<Results>, Status> {
+    let page_size = 5;
+
+    match get_url_list(state, query, page, page_size, language_option).await {
+        Ok(urls) => Ok(Json(Results { urls })),
+        Err(_) => Err(Status::InternalServerError),
+    }
+}
+
+#[get("/")]
+fn _get_peers(state: &State<Config>) -> Result<Json<Peers>, Status> {
+    let peers: Vec<Peer> = state
+        .peers
+        .iter()
+        .map(|peer| Peer {
+            address: String::from_utf8_lossy(&peer.unwrap().0).parse().unwrap(),
+        })
+        .collect();
+
+    Ok(Json(Peers { peers }))
+}
+
+#[get("/?<address>")]
+fn _get_peer(state: &State<Config>, address: &str) -> Result<Json<Peer>, Status> {
+    if let Ok(value_result) = state.peers.get(address) {
+        if let Some(value_option) = value_result {
+            if let Ok(peer) =
+                json::from_str::<Peer>(String::from_utf8_lossy(&value_option).as_ref())
+            {
+                Ok(Json(peer))
+            } else {
+                Err(Status::InternalServerError)
+            }
+        } else {
+            Err(Status::ExpectationFailed)
+        }
+    } else {
+        Err(Status::NotFound)
+    }
+}
+
+#[post("/", format = "json", data = "<peer>")]
+fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Status {
+    if (&peer).address.starts_with("http://") || (&peer).address.starts_with("https://") {
+        return Status::NotAcceptable;
+    }
+
+    if let Ok(_) = state
+        .peers
+        .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
+    {
+        return Status::Accepted;
+    } else {
+        return Status::NotAcceptable;
+    }
+}
+
+#[put("/", format = "json", data = "<peer>")]
+fn _update_peer(state: &State<Config>, peer: Json<Peer>) -> Status {
+    if (&peer).address.starts_with("http://") || (&peer).address.starts_with("https://") {
+        return Status::NotAcceptable;
+    }
+
+    if let Ok(_) = state
+        .peers
+        .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
+    {
+        return Status::Accepted;
+    } else {
+        return Status::NotModified;
+    }
 }
 
 #[launch]
@@ -99,6 +148,7 @@ fn rocket() -> _ {
 
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
+    let peers = sled::open("peerDatabase").expect("open");
     let mut index = hora::index::hnsw_idx::HNSWIndex::<f32, u128>::new(
         50,
         &hora::index::hnsw_params::HNSWParams::<f32>::default(),
@@ -126,9 +176,13 @@ fn rocket() -> _ {
         vec_index: index,
         db,
         embeddings,
+        peers,
     };
 
     rocket::build()
         .manage(config)
         .mount("/_answer", routes![_answer])
+        .mount("/_results", routes![_results])
+        .mount("/_peers", routes![_get_peers])
+        .mount("/_peer", routes![_get_peer, _add_peer, _update_peer])
 }
