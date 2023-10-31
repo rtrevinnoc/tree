@@ -8,6 +8,7 @@ use rocket::http::Status;
 use rocket::response::{self, Responder};
 use rocket::serde::{json, json::Json, Deserialize, Serialize};
 use rocket::{Request, State};
+use std::env::var;
 use std::{fs::File, io::BufReader};
 use thiserror::Error;
 use tree::{get_url_list, CrawledEntry, Url};
@@ -41,6 +42,7 @@ struct Config {
     db: sled::Db,
     embeddings: Embeddings<SimpleVocab, NdArray>,
     peers: sled::Db,
+    http_client: reqwest::Client,
 }
 
 #[derive(Error, Debug)]
@@ -203,7 +205,7 @@ fn _get_peer(state: &State<Config>, address: &str) -> Result<Json<Peer>, Error> 
 }
 
 #[post("/", format = "json", data = "<peer>")]
-fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
+async fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
     if !(&peer).address.starts_with("http://") || !(&peer).address.starts_with("https://") {
         return Err(Error::BadRequest);
     }
@@ -212,6 +214,24 @@ fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Erro
         .peers
         .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
     {
+        let this_peer_address = if let Ok(address) = var("PEAR_ADDRESS") {
+            address
+        } else {
+            return Err(Error::InternalServerError);
+        };
+
+        let this_peer = Peer {
+            address: this_peer_address,
+        };
+
+        state
+            .http_client
+            .post(format!("{}/_peer", &peer.address))
+            .header("Content-Type", "application/json")
+            .body(json::to_string(&this_peer).unwrap())
+            .send()
+            .await?;
+
         return Ok(peer);
     } else {
         return Err(Error::InternalServerError);
@@ -219,7 +239,7 @@ fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Erro
 }
 
 #[put("/", format = "json", data = "<peer>")]
-fn _update_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
+async fn _update_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
     if !(&peer).address.starts_with("http://") || !(&peer).address.starts_with("https://") {
         return Err(Error::BadRequest);
     }
@@ -228,6 +248,24 @@ fn _update_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, E
         .peers
         .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
     {
+        let this_peer_address = if let Ok(address) = var("PEAR_ADDRESS") {
+            address
+        } else {
+            return Err(Error::InternalServerError);
+        };
+
+        let this_peer = Peer {
+            address: this_peer_address,
+        };
+
+        state
+            .http_client
+            .post(format!("{}/_peer", &peer.address))
+            .header("Content-Type", "application/json")
+            .body(json::to_string(&this_peer).unwrap())
+            .send()
+            .await?;
+
         return Ok(peer);
     } else {
         return Err(Error::InternalServerError);
@@ -240,6 +278,7 @@ fn rocket() -> _ {
     p.push("glove.6B/glove.6B.50d.txt");
     let mut reader = BufReader::new(File::open(p).unwrap());
 
+    let http_client = reqwest::Client::new();
     let embeddings = Embeddings::read_text(&mut reader).unwrap();
     let db = sled::open("urlDatabase").expect("open");
     let peers = sled::open("peerDatabase").expect("open");
@@ -269,6 +308,7 @@ fn rocket() -> _ {
         db,
         embeddings,
         peers,
+        http_client,
     };
 
     rocket::build()
