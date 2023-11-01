@@ -32,13 +32,12 @@ struct Peers {
     peers: Vec<Peer>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Peer {
     address: String,
 }
 
 struct Config {
-    this_peer: Peer,
     vec_index: hora::index::hnsw_idx::HNSWIndex<f32, u128>,
     db: sled::Db,
     embeddings: Embeddings<SimpleVocab, NdArray>,
@@ -188,7 +187,7 @@ fn _get_peer(state: &State<Config>, address: &str) -> Result<Json<Peer>, Error> 
 
 #[post("/", format = "json", data = "<peer>")]
 async fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
-    if !(&peer).address.starts_with("http://") || !(&peer).address.starts_with("https://") {
+    if !(&peer).address.starts_with("http://") && !(&peer).address.starts_with("https://") {
         return Err(Error::BadRequest);
     }
 
@@ -196,14 +195,6 @@ async fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>
         .peers
         .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
     {
-        state
-            .http_client
-            .post(format!("{}/_peer", &peer.address))
-            .header("Content-Type", "application/json")
-            .body(json::to_string(&state.this_peer).unwrap())
-            .send()
-            .await?;
-
         return Ok(peer);
     } else {
         return Err(Error::InternalServerError);
@@ -234,50 +225,55 @@ async fn rocket() -> _ {
         address: var("PEAR_ADDRESS").unwrap(),
     };
 
-    match var("PEAR_SYNC_WITH") {
+    let mut peer_list: Vec<Peer> = match var("PEAR_SYNC_WITH") {
         Ok(address) => match http_client.get(format!("{}/_peers", address)).send().await {
             Ok(json_value) => match json_value.json::<Peers>().await {
-                Ok(peers_json) => {
-                    for peer in peers_json.peers.iter() {
-                        match peers.insert(&peer.address, json::to_string(peer).unwrap().as_str()) {
-                            Ok(_) => {
-                                match http_client
-                                    .post(format!("{}/_peer", &this_peer.address))
-                                    .header("Content-Type", "application/json")
-                                    .body(json::to_string(&this_peer).unwrap())
-                                    .send()
-                                    .await
-                                {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        println!(
-                                                "Error: {:?}. Error requesting this peer registration at another peer.",
-                                                e
-                                                );
-                                    }
-                                };
-                            }
-                            Err(e) => {
-                                println!(
-                                    "Error: {:?}. Error inserting peer into peer database.",
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
+                Ok(peers_json) => peers_json.peers,
                 Err(e) => {
                     println!("Error: {:?}. Deserialization error while fetching peer.", e);
+                    vec![]
                 }
             },
             Err(e) => {
                 println!("Error: {:?}. Error fetching peer.", e);
+                vec![]
             }
         },
         Err(e) => {
             println!("Error: {:?}. Set the PEAR_SYNC_WITH environment variable to where you want to the serer with which you want to sync peers with.", e);
+            vec![]
         }
     };
+
+    peer_list.push(this_peer.clone());
+    for peer in peer_list.iter() {
+        match peers.insert(&peer.address, json::to_string(peer).unwrap().as_str()) {
+            Ok(_) => {
+                if peer.address == this_peer.address {
+                    continue;
+                }
+
+                match http_client
+                    .post(format!("{}/_peer", &peer.address))
+                    .header("Content-Type", "application/json")
+                    .body(json::to_string(&this_peer).unwrap())
+                    .send()
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        println!(
+                            "Error: {:?}. Error requesting this peer registration at another peer.",
+                            e
+                        );
+                    }
+                };
+            }
+            Err(e) => {
+                println!("Error: {:?}. Error inserting peer into peer database.", e);
+            }
+        }
+    }
 
     for url in db.iter() {
         if let Ok(url) = url {
@@ -298,7 +294,6 @@ async fn rocket() -> _ {
         .unwrap();
 
     let config = Config {
-        this_peer,
         vec_index,
         db,
         embeddings,
