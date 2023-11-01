@@ -27,17 +27,18 @@ struct Results {
     urls: Vec<Url>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Peers {
     peers: Vec<Peer>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Peer {
     address: String,
 }
 
 struct Config {
+    this_peer: Peer,
     vec_index: hora::index::hnsw_idx::HNSWIndex<f32, u128>,
     db: sled::Db,
     embeddings: Embeddings<SimpleVocab, NdArray>,
@@ -47,29 +48,29 @@ struct Config {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("http error")]
+    #[error("Http error")]
     Reqwest {
         #[from]
         source: reqwest::Error,
     },
-    #[error("serialization error")]
+    #[error("Serialization error")]
     Json {
         #[from]
         source: json::serde_json::Error,
     },
-    #[error("internal server error")]
+    #[error("Internal server error")]
     InternalServerError,
-    #[error("expectation failed error")]
+    #[error("Expectation failed error")]
     ExpectationFailed,
-    #[error("not acceptable error")]
+    #[error("Not acceptable error")]
     NotAcceptable,
-    #[error("not modified error")]
+    #[error("Not modified error")]
     NotModified,
-    #[error("not found error")]
+    #[error("Not found error")]
     NotFound,
-    #[error("bad request error")]
+    #[error("Bad request error")]
     BadRequest,
-    #[error("unknown error")]
+    #[error("Unknown error")]
     Unknown,
 }
 
@@ -97,6 +98,7 @@ async fn _answer(
     let page_size = 5;
 
     let urls = match get_url_list(
+        &state.http_client,
         &state.embeddings,
         &state.vec_index,
         &state.db,
@@ -111,31 +113,10 @@ async fn _answer(
         Err(_) => return Err(Error::InternalServerError),
     };
 
-    // for peer in state.peers.iter() {
-    //     if let Ok(peer) = peer {
-    //         let peer_key: u128 = String::from_utf8_lossy(&peer.0).parse().unwrap();
-    //         match json::from_str::<Peer>(String::from_utf8_lossy(&peer.1).as_ref()) {
-    //             Ok(_peer_value) => {
-    //                 let response = reqwest::get(format!(
-    //                     "{}/_results?query={}&page={}",
-    //                     peer_key, query, page
-    //                 ))
-    //                 .await?
-    //                 .text()
-    //                 .await?;
-    //
-    //                 let mut results = json::from_str::<Results>(&response)?;
-    //                 urls.append(&mut results.urls)
-    //             }
-    //             Err(_) => return Err(Error::InternalServerError),
-    //         }
-    //     }
-    // }
-
-    let dbpedia_resource = dbpedia::get_resource(query)
+    let dbpedia_resource = dbpedia::get_resource(&state.http_client, query)
         .await
         .unwrap_or(String::from(""));
-    let answer = dbpedia::get_summary(&dbpedia_resource)
+    let answer = dbpedia::get_summary(&state.http_client, &dbpedia_resource)
         .await
         .unwrap_or(String::from(""));
 
@@ -157,6 +138,7 @@ async fn _results(
     let page_size = 5;
 
     match get_url_list(
+        &state.http_client,
         &state.embeddings,
         &state.vec_index,
         &state.db,
@@ -214,21 +196,11 @@ async fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>
         .peers
         .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
     {
-        let this_peer_address = if let Ok(address) = var("PEAR_ADDRESS") {
-            address
-        } else {
-            return Err(Error::InternalServerError);
-        };
-
-        let this_peer = Peer {
-            address: this_peer_address,
-        };
-
         state
             .http_client
             .post(format!("{}/_peer", &peer.address))
             .header("Content-Type", "application/json")
-            .body(json::to_string(&this_peer).unwrap())
+            .body(json::to_string(&state.this_peer).unwrap())
             .send()
             .await?;
 
@@ -240,40 +212,11 @@ async fn _add_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>
 
 #[put("/", format = "json", data = "<peer>")]
 async fn _update_peer(state: &State<Config>, peer: Json<Peer>) -> Result<Json<Peer>, Error> {
-    if !(&peer).address.starts_with("http://") || !(&peer).address.starts_with("https://") {
-        return Err(Error::BadRequest);
-    }
-
-    if let Ok(_) = state
-        .peers
-        .insert(&peer.address, json::to_string(&peer.0).unwrap().as_str())
-    {
-        let this_peer_address = if let Ok(address) = var("PEAR_ADDRESS") {
-            address
-        } else {
-            return Err(Error::InternalServerError);
-        };
-
-        let this_peer = Peer {
-            address: this_peer_address,
-        };
-
-        state
-            .http_client
-            .post(format!("{}/_peer", &peer.address))
-            .header("Content-Type", "application/json")
-            .body(json::to_string(&this_peer).unwrap())
-            .send()
-            .await?;
-
-        return Ok(peer);
-    } else {
-        return Err(Error::InternalServerError);
-    }
+    return _add_peer(state, peer).await;
 }
 
 #[launch]
-fn rocket() -> _ {
+async fn rocket() -> _ {
     let mut p = project_root::get_project_root().unwrap();
     p.push("glove.6B/glove.6B.50d.txt");
     let mut reader = BufReader::new(File::open(p).unwrap());
@@ -287,6 +230,55 @@ fn rocket() -> _ {
         &hora::index::hnsw_params::HNSWParams::<f32>::default(),
     );
 
+    let this_peer = Peer {
+        address: var("PEAR_ADDRESS").unwrap(),
+    };
+
+    match var("PEAR_SYNC_WITH") {
+        Ok(address) => match http_client.get(format!("{}/_peers", address)).send().await {
+            Ok(json_value) => match json_value.json::<Peers>().await {
+                Ok(peers_json) => {
+                    for peer in peers_json.peers.iter() {
+                        match peers.insert(&peer.address, json::to_string(peer).unwrap().as_str()) {
+                            Ok(_) => {
+                                match http_client
+                                    .post(format!("{}/_peer", &this_peer.address))
+                                    .header("Content-Type", "application/json")
+                                    .body(json::to_string(&this_peer).unwrap())
+                                    .send()
+                                    .await
+                                {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        println!(
+                                                "Error: {:?}. Error requesting this peer registration at another peer.",
+                                                e
+                                                );
+                                    }
+                                };
+                            }
+                            Err(e) => {
+                                println!(
+                                    "Error: {:?}. Error inserting peer into peer database.",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Error: {:?}. Deserialization error while fetching peer.", e);
+                }
+            },
+            Err(e) => {
+                println!("Error: {:?}. Error fetching peer.", e);
+            }
+        },
+        Err(e) => {
+            println!("Error: {:?}. Set the PEAR_SYNC_WITH environment variable to where you want to the serer with which you want to sync peers with.", e);
+        }
+    };
+
     for url in db.iter() {
         if let Ok(url) = url {
             let url_key: u128 = String::from_utf8_lossy(&url.0).parse().unwrap();
@@ -294,7 +286,9 @@ fn rocket() -> _ {
                 Ok(url_value) => {
                     vec_index.add(&url_value.vec, url_key).unwrap();
                 }
-                Err(_) => {}
+                Err(e) => {
+                    println!("Error: {:?}. URL database deserialization error.", e);
+                }
             }
         }
     }
@@ -304,6 +298,7 @@ fn rocket() -> _ {
         .unwrap();
 
     let config = Config {
+        this_peer,
         vec_index,
         db,
         embeddings,

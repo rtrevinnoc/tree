@@ -139,7 +139,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => {
             println!("Error: {:?}. Set the START_URL environment variable to where you want to start crawling.", e);
-            return Ok(());
+            return Err("Environment variable not set".into());
         }
     }
 
@@ -152,6 +152,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let languages = vec![English, Spanish];
     let detector: LanguageDetector = LanguageDetectorBuilder::from_languages(&languages).build();
+    let http_client = reqwest::Client::new();
 
     while let Some(output) = collector.next().await {
         if let Ok((url, title, header, description, _)) = output {
@@ -161,7 +162,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Some(language) => language.iso_code_639_1().to_string(),
                 None => String::from("unk"),
             };
-            if let Some(vec) = get_sentence_embedding(&embeddings, &title).await {
+            if let Some(vec) = get_sentence_embedding(&http_client, &embeddings, &title).await {
                 let crawled_json = CrawledEntry {
                     url: url_string,
                     title: title.clone(),

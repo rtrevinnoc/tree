@@ -53,6 +53,7 @@ pub fn get_chunk_embedding(
 }
 
 pub async fn get_sentence_embedding(
+    client: &reqwest::Client,
     embeddings: &Embeddings<SimpleVocab, NdArray>,
     sentence: &str,
 ) -> Option<Array<f32, Ix1>> {
@@ -63,8 +64,10 @@ pub async fn get_sentence_embedding(
         match get_word_embedding(embeddings, word) {
             Some(embedding) => sum_vector = sum_vector + embedding,
             None => {
-                if let Ok(dbpedia_resource) = dbpedia::get_resource(word).await {
-                    if let Ok(dbpedia_summary) = dbpedia::get_summary(&dbpedia_resource).await {
+                if let Ok(dbpedia_resource) = dbpedia::get_resource(&client, word).await {
+                    if let Ok(dbpedia_summary) =
+                        dbpedia::get_summary(&client, &dbpedia_resource).await
+                    {
                         if let Some(embedding) = get_chunk_embedding(embeddings, &dbpedia_summary) {
                             sum_vector = sum_vector + embedding;
                         }
@@ -82,6 +85,7 @@ pub async fn get_sentence_embedding(
 }
 
 pub async fn get_url_list(
+    client: &reqwest::Client,
     embeddings: &Embeddings<SimpleVocab, NdArray>,
     vec_index: &hora::index::hnsw_idx::HNSWIndex<f32, u128>,
     url_db: &sled::Db,
@@ -91,7 +95,7 @@ pub async fn get_url_list(
     language_option: Option<&str>,
 ) -> Result<Vec<Url>, ()> {
     let mut urls: Vec<Url> = Vec::new();
-    if let Some(query_vec) = get_sentence_embedding(embeddings, query).await {
+    if let Some(query_vec) = get_sentence_embedding(client, embeddings, query).await {
         for node in vec_index
             .search_nodes(&query_vec.to_vec(), page_size * page)
             .split_off(page_size * (page - 1))
