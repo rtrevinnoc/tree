@@ -22,6 +22,12 @@ struct Answer {
     corrected: String,
 }
 
+#[derive(Serialize)]
+struct Summary {
+    small_summary: String,
+    corrected: String,
+}
+
 #[derive(Serialize, Deserialize)]
 struct Results {
     urls: Vec<Url>,
@@ -151,6 +157,21 @@ async fn _results(
         Ok(urls) => Ok(Json(Results { urls })),
         Err(_) => Err(Error::InternalServerError),
     }
+}
+
+#[get("/?<query>")]
+async fn _summary(state: &State<Config>, query: &str) -> Result<Json<Summary>, Error> {
+    let dbpedia_resource = dbpedia::get_resource(&state.http_client, query)
+        .await
+        .unwrap_or(String::from(""));
+    let small_summary = dbpedia::get_summary(&state.http_client, &dbpedia_resource)
+        .await
+        .unwrap_or(String::from(""));
+
+    Ok(Json(Summary {
+        small_summary,
+        corrected: query.into(),
+    }))
 }
 
 #[get("/")]
@@ -305,6 +326,7 @@ async fn rocket() -> _ {
         .manage(config)
         .mount("/_answer", routes![_answer])
         .mount("/_results", routes![_results])
+        .mount("/_summary", routes![_summary])
         .mount("/_peers", routes![_get_peers])
         .mount("/_peer", routes![_get_peer, _add_peer, _update_peer])
 }
